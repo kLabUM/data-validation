@@ -86,3 +86,19 @@ def cut_ends(df):
     a = a[a['Value']<q99]
     return a
     
+'''
+Looks for intersections in a 3 month rolling mean and a year-long rolling mean to identify seasonality in the data. 
+''' 
+def separate_seasons(df):
+    df = df.copy()
+    breakpoints = [df.index[0]]
+    df['season'] = df['Value'].rolling('90d', min_periods=1).mean()
+    df['year'] = df['Value'].rolling('365d', min_periods=1).mean()
+
+    use = df[abs(df['year'] - df['season']) != 0]
+    cuts = use[abs(use['year'] - use['season']) < 0.01].index
+    for cut in cuts:
+        breakpoints.append(cut)
+    
+    breakpoints.append(df.index[-1])
+    return breakpoints

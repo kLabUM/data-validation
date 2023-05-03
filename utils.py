@@ -8,18 +8,18 @@ from sklearn.pipeline import make_pipeline
 Reads csv from data/ folder in as a dataframe.
     - Converts timestamp to pandas datatime datatype
 '''
-def import_data(index=None, node_id=None, site_id=None):
+def import_wl_data(index=None, node_id=None, site_id=None):
     metadata = pd.read_csv("data/metadata.csv")
     if index is not None:
         try:
-            file = f"data/{metadata.iloc[index]['Node ID']}_{metadata.iloc[index]['Site ID']}.csv"
+            file = f"data/water_level/{metadata.iloc[index]['Node ID']}_{metadata.iloc[index]['Site ID']}.csv"
         except:
             print("Index out of bounds.")
-            return
+            return pd.DataFrame({})
     elif node_id is not None and site_id is not None:
-        file = f"data/{node_id}_{site_id}.csv"
+        file = f"data/water_level/{node_id}_{site_id}.csv"
     else:
-        return
+        return pd.DataFrame({})
     
     try:
         df = pd.read_csv(file)
@@ -30,6 +30,28 @@ def import_data(index=None, node_id=None, site_id=None):
     df.index = df['Unnamed: 0']
     df = df[['Value']]
     return df
+
+def import_ph_data(node_id, start, end):
+    df = pd.read_csv(f"data/pH_sensors/{node_id}.csv")
+    df['Unnamed: 0'] = pd.to_datetime(df['Unnamed: 0'])
+    df.index = df['Unnamed: 0']
+    df = df[['Value']]
+    df = df[start:end]
+    return df
+
+def import_ec_data(node_id, start, end):
+    df = pd.read_csv(f"data/ec_sensors/{node_id}.csv")
+    df['Unnamed: 0'] = pd.to_datetime(df['Unnamed: 0'])
+    df.index = df['Unnamed: 0']
+    df = df[['Value']]
+    df = df[start:end]
+    return df
+
+def grab_data(node_id, measurement, start, end):
+    tags = {'node_id':f"{node_id}"}
+    data = Query.run_query(field='value', measurement=measurement, tags=tags, df=True)
+    data = data[start:end]
+    return data
 
 '''
 Separates depth data into rising/falling sections.
@@ -80,25 +102,44 @@ def remove_outliers(df, n_stdev=3):
 '''
 Clips the dataset, dropping data above the 99th percentile (for value) and below the 1st percentile (for value). 
 '''
+# def cut_ends(df):
+#     try:
+# #     if len(df) > 100:
+#         q1, q99 = df['Value'].quantile([0.01, 0.99])
+#         a = df[df['Value']>q1]
+#         a = a[a['Value']<q99]
+#         return a
+#     except:
+#         return df
+    
 def cut_ends(df):
-    q1, q99 = df['Value'].quantile([0.01, 0.99])
-    a = df[df['Value']>q1]
-    a = a[a['Value']<q99]
-    return a
+    try:
+        q1, q99 = df['Value'].quantile([0.005, 0.995])
+        a = df.copy()
+        if len(df[df['Value']<q1]) < 0.02*len(df): 
+            a = df[df['Value']>q1]
+        if len(a[a['Value']>q99]) < 0.02*len(df):
+            a = a[a['Value']<q99]
+        return a
+    except:
+        return df
     
 '''
 Looks for intersections in a 3 month rolling mean and a year-long rolling mean to identify seasonality in the data. 
 ''' 
 def separate_seasons(df):
     df = df.copy()
-    breakpoints = [df.index[0]]
-    df['season'] = df['Value'].rolling('90d', min_periods=1).mean()
-    df['year'] = df['Value'].rolling('365d', min_periods=1).mean()
+    if len(df) > 0:
+        breakpoints = [df.index[0]]
+        df['season'] = df['Value'].rolling('90d', min_periods=1).mean()
+        df['year'] = df['Value'].rolling('365d', min_periods=1).mean()
 
-    use = df[abs(df['year'] - df['season']) != 0]
-    cuts = use[abs(use['year'] - use['season']) < 0.01].index
-    for cut in cuts:
-        breakpoints.append(cut)
-    
-    breakpoints.append(df.index[-1])
+        use = df[abs(df['year'] - df['season']) != 0]
+        cuts = use[abs(use['year'] - use['season']) < 0.01].index
+        for cut in cuts:
+            breakpoints.append(cut)
+
+        breakpoints.append(df.index[-1])
+    else:
+        breakpoints = []
     return breakpoints
